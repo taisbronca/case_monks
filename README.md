@@ -61,7 +61,7 @@ Ambas as ferramentas extraem o intervalo de datas diretamente da pergunta do usu
 
 ---
 
-## Interface do Agente (Cleytinho)
+## Interface do Agente
 
 ![Interface do Analista de Mídia Cleytinho](cleytinho.png)
 
