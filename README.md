@@ -1,78 +1,88 @@
-# Agente de IA para Análise de Mídia | Case Técnico Monks
+# AI Agent for Media Analysis
 
-Um agente autônomo que atua como analista júnior de mídia: recebe perguntas em linguagem natural sobre tráfego e receita, decide quais dados precisa, consulta o BigQuery e devolve insights acionáveis (não apenas números brutos).
+This project is an autonomous AI agent that acts like a junior media analyst.
+
+Instead of dashboards or static queries, you ask questions in plain English like:
+
+“Which channel had the best ROI last quarter?”
+
+And the agent:
+
+- decides what data it needs
+- queries BigQuery safely
+- returns clear, actionable insights
 
 ---
 
-## Arquitetura
+## Architecture
 
-O agente opera em um **loop ReAct** (Raciocinar → Agir → Observar) orquestrado pelo LangGraph.
+The agent operates in a **ReAct loop** (Reason → Act → Observe) orchestrated by LangGraph.
 
-A decisão central de design foi manter a LLM responsável apenas pelo raciocínio e pela linguagem, delegando todo o acesso a dados para ferramentas Python tipadas. Isso evita o erro comum de empurrar resultados SQL direto no prompt e torcer para o modelo interpretá-los corretamente
+The key design decision was to keep the LLM responsible only for reasoning and language, delegating all data access to typed Python tools. This avoids the common mistake of pushing SQL results directly into the prompt and hoping the model interprets them correctly.
 
-A arquitetura segue o padrão **LLM-as-Controller**, onde o modelo decide quais ferramentas utilizar enquanto a execução das operações ocorre em código determinístico.
+The architecture follows the **LLM-as-Controller** pattern, where the model decides which tools to use while execution happens in deterministic code.
 
 ```
-Pergunta do usuário
+User question
         │
         ▼
   FastAPI /chat
         │
         ▼
-  Agente LangGraph  ──── decide ────►  tool_get_traffic_volume
-   (gpt-4o-mini)                           └─ COUNT em users, filtrado por
-        │                                      traffic_source + intervalo de datas
-        │            ──── decide ────►  tool_get_channel_performance
-        │                                   └─ JOIN users + orders + order_items
-        │                                      (exclui pedidos cancelados/devolvidos)
+  LangGraph Agent  ──── decides ────►  tool_get_traffic_volume
+   (gpt-4o-mini)                          └─ COUNT on users, filtered by
+        │                                     traffic_source + date range
+        │            ──── decides ────►  tool_get_channel_performance
+        │                                  └─ JOIN users + orders + order_items
+        │                                     (excludes cancelled/returned orders)
         ▼
-  Resposta analítica em linguagem natural
+  Analytical response in natural language
 ```
 
-### Por que LangGraph em vez de LangChain puro?
+### Why LangGraph instead of pure LangChain?
 
-O LangGraph modela o agente como uma máquina de estados explícita, tornando o loop de tool calling inspecionável e fácil de evoluir. Adicionar uma nova ferramenta ou um desvio condicional (por exemplo, "se dados de receita estiverem ausentes, usar só volume de tráfego") é uma aresta no grafo, não um callback enterrado no meio do código.
+LangGraph models the agent as an explicit state machine, making the tool-calling loop inspectable and easy to evolve. Adding a new tool or a conditional branch (e.g., “if revenue data is missing, use only traffic volume”) becomes an edge in the graph—not a callback buried in the code.
 
-### Ferramentas
+### Tools
 
-| Ferramenta                     | Quando é acionada                                 | Query executada                                                             |
+| Tool                     | When it is triggered                                 | Executed Query                                                             |
 | ------------------------------ | ------------------------------------------------- | --------------------------------------------------------------------------- |
-| `tool_get_traffic_volume`      | Perguntas sobre volume de usuários, topo de funil | `COUNT` em `users`, parametrizado por `traffic_source` e data               |
-| `tool_get_channel_performance` | ROI, receita, ranking de canais                   | `JOIN users + orders + order_items`, filtra status `cancelled` e `returned` |
+| `tool_get_traffic_volume`      | Questions about user volume, top of funnel | `COUNT` on `users`, pparameterized by `traffic_source` and date              |
+| `tool_get_channel_performance` | ROI, revenue, channel ranking                   | `JOIN users + orders + order_items`, filters status `cancelled` and `returned` |
 
-Ambas as ferramentas extraem o intervalo de datas diretamente da pergunta do usuário (via LLM) e os passam como parâmetros para o BigQuery, sem interpolação de strings, sem risco de SQL Injection.
+Both tools extract the date range directly from the user’s question (via LLM) and pass it as parameters to BigQuery, without string interpolation—eliminating SQL injection risk.
 
 ---
 
-## Estrutura do Projeto
+## Project Structure
 
 ```
 .
-├── main.py                   # App FastAPI, rotas e tipagem Pydantic
+├── main.py                   # FastAPI app, routes, and Pydantic typing
 ├── agent/
-│   ├── bot.py                # Definição do LangGraph e Persona do agente
-│   └── tools.py              # Ferramentas expostas para a IA (@tool)
+│   ├── bot.py                # LangGraph definition and agent persona
+│   └── tools.py              # Tools exposed to the AI (@tool)
 ├── database/
-│   └── bigquery_client.py    # Conexão GCP e queries SQL parametrizadas
-├── requirements.txt          # Dependências do projeto
-├── .env                      # Variáveis de ambiente (ignorado no git)
-└── .env.example              # Exemplo de variáveis de ambiente
+│   └── bigquery_client.py    # GCP connection and parameterized SQL queries
+├── requirements.txt          # Project dependencies
+├── .env                      # Environment variables (ignored in git)
+└── .env.example              # Example environment variables
 ```
 
 ---
 
-## Interface do Agente
+## Agent Interface (Cleytinho)
 
 ![Interface do Analista de Mídia Cleytinho](cleytinho.png)
 
-*(Interface construída em Streamlit consumindo a API do LangGraph)*
+*(Interface built with Streamlit consuming the LangGraph API)*
 
 
 ## Setup
 
-**Pré-requisitos:** Python 3.10+, uma conta no GCP com acesso de leitura ao BigQuery (o nível gratuito é suficiente) e uma API Key da OpenAI.
+**Prerequisites:** Python 3.10+, a GCP account with read access to BigQuery (free tier is sufficient), and an OpenAI API Key.
 
-### 1. Clonar e instalar dependências
+### 1. Clone and install dependencies
 
 ```bash
 git clone https://github.com/taisbronca/case_monks.git
@@ -81,98 +91,98 @@ python3 -m venv venv && source venv/bin/activate  # Windows: venv\Scripts\activa
 pip install -r requirements.txt
 ```
 
-### 2. Credenciais
+### 2. Credentials
 
-Coloque o arquivo JSON da sua conta de serviço do GCP na raiz do projeto (ex: `gcp-key.json`).
-Crie o arquivo `.env` a partir do exemplo incluído no repositório:
+Place your GCP service account JSON file in the project root (e.g., `gcp-key.json`).
+Create the `.env` file from the example included in the repository:
 
 ```bash
 cp .env.example .env
 ```
 
-Preencha o `.env`:
+Fill in the `.env`:
 
 ```
 GOOGLE_APPLICATION_CREDENTIALS="./gcp-key.json"
 OPENAI_API_KEY="sk-..."
 ```
 
-A conta de serviço precisa das permissões `roles/bigquery.user` e `roles/bigquery.dataViewer` no projeto `bigquery-public-data`.
+The service account must have the permissions `roles/bigquery.user` and `roles/bigquery.dataViewer` in the `bigquery-public-data` project.
 
-### 3. Executar a Aplicação
+### 3. Run the Application
 
-A arquitetura possui dois serviços que devem rodar simultaneamente: a API (Backend) e a Interface Visual (Frontend).
+The architecture includes two services that must run simultaneously: the API (Backend) and the Visual Interface (Frontend).
 
 **Terminal 1 (Backend - FastAPI):**
-Inicie o servidor principal, que processará a IA e conectará ao banco de dados:
+Start the main server, which will process the AI and connect to the database:
 
 ```bash
 uvicorn main:app --reload
 ```
 
-A API estará rodando em http://127.0.0.1:8000 (com documentação interativa em /docs).
+The API will be available at http://127.0.0.1:8000 (with interactive docs at /docs).
 
 **Terminal 2 (Frontend - Streamlit):**
-A interface foi construída em Streamlit para demonstrar rapidamente o valor do agente em um contexto próximo ao de produto, permitindo que analistas interajam com o sistema sem precisar acessar diretamente a API.
+The interface was built with Streamlit to quickly demonstrate the agent’s value in a product-like context, allowing analysts to interact with the system without directly accessing the API.
 
-Abra uma nova aba de terminal, ative o ambiente virtual (source venv/bin/activate) e rode a interface gráfica do chat:
+Open a new terminal tab, activate the virtual environment (source venv/bin/activate), and run the chat UI:
 
 ```bash
 streamlit run frontend.py
 ```
 
-A interface do Agente abrirá automaticamente no seu navegador em http://localhost:8501.
+The Agent interface will automatically open in your browser at http://localhost:8501.
 
-## Exemplos de Uso
+## Usage Examples
 
-Você pode interagir com o Agente de duas formas:
+You can interact with the Agent in two ways:
 
-Opção A: Pela Interface Gráfica (Recomendado)
-Acesse http://localhost:8501 e digite suas perguntas em linguagem natural diretamente no chat.
+Option A: Graphical Interface (Recommended)
+Acess http://localhost:8501 and type your questions in natural language directly into the chat.
 
-Opção B: Via API (cURL ou Swagger)
-Faça uma requisição POST para a rota /chat contendo a pergunta no corpo (body):
+Option B: API (cURL or Swagger)
+Send a POST request to the /chat endpoint with the question in the request body:
 
 ```bash
 curl -X POST http://127.0.0.1:8000/chat \
   -H "Content-Type: application/json" \
-  -d '{"pergunta": "Qual foi a performance de receita dos canais de mídia em janeiro de 2024?"}'
+  -d '{"pergunta": "What was the revenue performance of media channels in January 2024?"}'
 ```
 
-Como o Agente processa:
-Ao receber a pergunta, o agente vai: extrair o período, acionar a ferramenta tool_get_channel_performance, cruzar as três tabelas no BigQuery de forma segura e retornar uma análise ranqueada com receita e volume de pedidos por canal.
+How the Agent processes it:
+Upon receiving the question, the agent will: extract the time period, trigger the tool_get_channel_performance tool, safely join the three tables in BigQuery, and return a ranked analysis with revenue and order volume per channel.
 
-Outros exemplos de perguntas que o agente responde:
+Other example questions the agent can answer:
 
-- "Como foi o volume de usuários vindos de Search no último trimestre?"
-- "Qual canal tem melhor ROI e por quê?"
-- "Compare o desempenho de Facebook e Email em 2023."
+- "What was the volume of users coming from Search last quarter?"
+- "Which channel has the best ROI and why?"
+- "Compare the performance of Facebook and Email in 2023."
 
 ---
 
 ## Dataset
 
-Utiliza o dataset público do BigQuery `bigquery-public-data.thelook_ecommerce`. A coluna `traffic_source` da tabela `users` é tratada como proxy de canal de mídia (Search, Organic, Facebook, Email, Display).
+Uses the public BigQuery dataset `bigquery-public-data.thelook_ecommerce`. The `traffic_source` column in the `users` table is treated as a proxy for media channels (Search, Organic, Facebook, Email, Display).
 
 ---
 
-## Limitações do MVP
+## MVP Limitations
 
-Este MVP foi construído para demonstrar a arquitetura de agentes com tool calling.
+This MVP was built to demonstrate an agent architecture with tool calling.
 
-Possíveis evoluções:
+Possible improvements:
 
-- Adicionar cache de queries para reduzir custo de BigQuery
-- Suporte a múltiplas métricas (CAC, LTV, conversão)
-- Uso de Vector DB para memória analítica
-- Deploy serverless em Cloud Run
+- Add query caching to reduce BigQuery costs
+- Support for multiple metrics (CAC, LTV, conversion)
+- Use of a Vector DB for analytical memory
+- Serverless deployment on Cloud Run
 
 ---
-## Próximos Passos
+## Next Steps
 
-Se evoluído para produção, o agente poderia:
+If evolved into production, the agent could:
 
-- Integrar diretamente com APIs de mídia (Google Ads, Meta Ads)
-- Executar análises automáticas diárias
-- Gerar alertas de performance
-- Criar relatórios automáticos para gestores
+- Integrate directly with media APIs (Google Ads, Meta Ads)
+- Run automated daily analyses
+- Generate performance alerts
+- Create automated reports for managers
